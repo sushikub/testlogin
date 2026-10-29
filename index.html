@@ -63,6 +63,19 @@ input{font:14px var(--f-mono);padding:9px 10px;border:1px solid var(--line);bord
 .chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:2px 10px;border-radius:99px;background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent)}
 .chip::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
 .chip.demo{background:var(--warn-bg);color:var(--warn)}
+.sso{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;align-items:center;padding:14px;border:1px solid var(--line);border-radius:8px;background:var(--surface);font-size:14px}
+.sso .dot{width:10px;height:10px;border-radius:50%;background:var(--muted)}
+.sso[data-s="run"] .dot{background:var(--accent);animation:pulse 1s ease-in-out infinite}
+.sso[data-s="ok"] .dot{background:var(--accent)}
+.sso[data-s="fail"] .dot{background:var(--warn)}
+.sso small{grid-column:2;color:var(--muted);font-size:12.5px}
+@keyframes pulse{50%{opacity:.3}}
+.email-box{display:grid;gap:6px;padding:16px;border-radius:8px;background:color-mix(in srgb,var(--accent) 9%,var(--surface));border:1px solid color-mix(in srgb,var(--accent) 30%,var(--line))}
+.email-box .lbl{font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.email-line{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.email-line strong{font:500 18px var(--f-mono);overflow-wrap:anywhere;min-width:0;flex:1}
+.copy{height:30px;padding:0 12px;border-radius:6px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:500 13px var(--f-body);cursor:pointer}
+.email-box small{color:var(--muted);font-size:12.5px}
 dl{margin:0;display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px 16px;font-size:14px;border-top:1px solid var(--line);padding-top:16px}
 dt{color:var(--muted)}
 dd{margin:0;font-family:var(--f-mono);font-size:13px;overflow-wrap:anywhere}
@@ -97,6 +110,10 @@ pre{margin:0;max-height:220px;overflow:auto;background:var(--bg);border:1px soli
         <h2>เข้าสู่ระบบ</h2>
         <p class="sub">สำหรับพนักงานที่มีบัญชี Microsoft 365 ของบริษัท</p>
       </div>
+      <div class="sso" id="sso" data-s="idle" role="status">
+        <span class="dot"></span><span id="ssoText">ยังไม่ได้ตั้งค่าการเชื่อมต่อ จึงยังตรวจหาบัญชีบนเครื่องนี้ไม่ได้</span>
+        <small id="ssoHint">ใส่ Client ID และ Tenant ID ด้านล่าง ระบบจะลองเข้าสู่ระบบอัตโนมัติด้วยบัญชีที่ใช้งานเครื่องนี้</small>
+      </div>
       <button class="ms-btn" id="btnLogin" type="button">
         <svg viewBox="0 0 21 21" aria-hidden="true"><rect x="1" y="1" width="9" height="9" fill="#F25022"/><rect x="11" y="1" width="9" height="9" fill="#7FBA00"/><rect x="1" y="11" width="9" height="9" fill="#00A4EF"/><rect x="11" y="11" width="9" height="9" fill="#FFB900"/></svg>
         Sign in with Microsoft
@@ -125,6 +142,11 @@ pre{margin:0;max-height:220px;overflow:auto;background:var(--bg);border:1px soli
           <h2 id="pName"></h2>
           <p class="sub" id="pMail" style="margin:0;overflow-wrap:anywhere"></p>
         </div>
+      </div>
+      <div class="email-box">
+        <span class="lbl">อีเมลผู้ใช้เครื่องนี้</span>
+        <div class="email-line"><strong id="pEmail"></strong><button class="copy" id="btnCopy" type="button">คัดลอก</button></div>
+        <small id="pSrc"></small>
       </div>
       <dl>
         <dt>UPN</dt><dd id="pUpn"></dd>
@@ -173,7 +195,12 @@ function showProfile(c, extra, demo){
   $("chip").textContent = demo ? "ตัวอย่าง (ข้อมูลจำลอง)" : "ยืนยันตัวตนแล้ว";
   $("chip").classList.toggle("demo", !!demo);
   $("pName").textContent = name;
-  $("pMail").textContent = (extra && extra.mail) || c.email || c.preferred_username || "";
+  $("pMail").textContent = (extra && extra.jobTitle) ? extra.jobTitle : "บัญชี Microsoft 365";
+  let email = "-", src = "ไม่พบอีเมลใน token";
+  if (extra && extra.mail){ email = extra.mail; src = "ที่มา: Microsoft Graph (ฟิลด์ mail) — อีเมลจริงของกล่องจดหมาย"; }
+  else if (c.email){ email = c.email; src = "ที่มา: claim email ใน ID token"; }
+  else if (c.preferred_username){ email = c.preferred_username; src = "ที่มา: UPN (preferred_username) — ส่วนใหญ่ตรงกับอีเมล แต่ไม่รับประกัน"; }
+  $("pEmail").textContent = email; $("pSrc").textContent = src;
   $("pUpn").textContent = c.preferred_username || "-";
   $("pOid").textContent = c.oid || "-";
   $("pTid").textContent = c.tid || "-";
@@ -194,17 +221,31 @@ async function afterLogin(account){
   showProfile(account.idTokenClaims || {}, extra, false);
 }
 
+function ssoState(s, text, hint){
+  $("sso").dataset.s = s; $("ssoText").textContent = text;
+  $("ssoHint").textContent = hint || ""; $("ssoHint").hidden = !hint;
+}
+
 async function init(){
   pca = makeClient();
   if (!pca) return;
+  ssoState("run", "กำลังตรวจหาบัญชี Microsoft ที่ใช้งานเครื่องนี้…");
   try {
     const res = await pca.handleRedirectPromise();
     const acc = res ? res.account : pca.getAllAccounts()[0];
-    if (acc) return afterLogin(acc);
-    // ลอง SSO เงียบ ๆ จาก session Microsoft ที่มีอยู่
-    const sso = await pca.ssoSilent({ scopes: SCOPES }).catch(() => null);
-    if (sso) afterLogin(sso.account);
-  } catch(e){ say("เชื่อมต่อไม่สำเร็จ: " + (e.errorMessage || e.message)); }
+    if (acc){ ssoState("ok", "พบบัญชี " + acc.username); return afterLogin(acc); }
+    // ลอง SSO เงียบ ๆ จาก session Windows / Microsoft ที่มีอยู่
+    const sso = await pca.ssoSilent({ scopes: SCOPES });
+    ssoState("ok", "พบบัญชี " + sso.account.username);
+    afterLogin(sso.account);
+  } catch(e){
+    const code = e.errorCode || "";
+    if (code === "login_required" || code === "interaction_required" || code === "consent_required")
+      ssoState("fail", "ไม่พบ session ที่เข้าอัตโนมัติได้ กรุณากด Sign in with Microsoft",
+        "เข้าอัตโนมัติได้เมื่อเครื่อง join กับ Entra ID และใช้ Edge หรือ Chrome ที่เปิด CloudAPAuthEnabled / extension Microsoft Single Sign On");
+    else
+      ssoState("fail", "ตรวจหาบัญชีอัตโนมัติไม่สำเร็จ", (e.errorMessage || e.message || code));
+  }
 }
 
 $("btnLogin").addEventListener("click", async () => {
@@ -231,6 +272,15 @@ $("btnDemo").addEventListener("click", () => {
     roles:["Ops.Supervisor"], ver:"2.0"
   }, { mail:"somchai.j@contoso.com", jobTitle:"Route Planning Supervisor", department:"Delivery Operations" }, true);
 });
+
+$("btnCopy").addEventListener("click", () => {
+  const t = $("pEmail").textContent, b = $("btnCopy");
+  const done = () => { b.textContent = "คัดลอกแล้ว"; setTimeout(() => b.textContent = "คัดลอก", 1500); };
+  try {
+    navigator.clipboard.writeText(t).then(done, () => selectEmail());
+  } catch(e){ selectEmail(); }
+});
+function selectEmail(){ const r = document.createRange(); r.selectNodeContents($("pEmail")); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
 
 $("btnLogout").addEventListener("click", () => {
   const acc = pca && pca.getActiveAccount();
